@@ -52,6 +52,10 @@ from ..git_version_info import version
 
 from deepspeed.profiling.flops_profiler.profiler import FlopsProfiler
 
+# SCR: import Scalable Checkpoint/Restart library
+import scr
+import time
+
 MEMORY_OPT_ALLREDUCE_SIZE = 500000000
 
 try:
@@ -141,6 +145,18 @@ class DeepSpeedEngine(Module):
         else:
             # Initialize torch distributed if needed
             init_distributed(dist_backend=self.dist_backend)
+
+        # TODO: make this configurable
+        # TODO: need to find a spot to call scr.finalize()
+        # TODO: one could add scr.need_checkpoint() and scr.should_exit()
+        # SCR: initialize SCR
+        self.use_scr = args.scr
+        self.scr_output_interval = args.save_interval
+        # Moved scr.init to megatron
+#        if self.use_scr:
+#            # DeepSpeed expects checkpoint files to be in a global file system on restart
+#            scr.config("SCR_GLOBAL_RESTART=1")
+#            scr.init()
 
         see_memory_usage(f"DeepSpeed Engine: Before args sanity test")
         self._do_args_sanity_check(args)
@@ -251,7 +267,7 @@ class DeepSpeedEngine(Module):
                                self.dp_world_size) != 0:
             #print(f'{train_batch_size=} {self.train_micro_batch_size_per_gpu()=} {self.dp_world_size=}')
             raise ValueError(
-                f'Train batch size must be divisible by micro-batch data parallelism')
+                f'Train batch size {train_batch_size} must be divisible by micro-batch data parallelism {self.train_micro_batch_size_per_gpu()} x {self.dp_world_size}')
         new_gas = train_batch_size // (self.train_micro_batch_size_per_gpu() *
                                        self.dp_world_size)
         # overwrite config
@@ -1736,15 +1752,24 @@ class DeepSpeedEngine(Module):
         """
 
         if tag is None:
-            latest_path = os.path.join(load_dir, 'latest')
-            if os.path.isfile(latest_path):
-                with open(latest_path, 'r') as fd:
-                    tag = fd.read().strip()
+            if self.use_scr:
+                # SCR: get name of latest checkpoint from SCR
+                tag = scr.have_restart()
+                if tag is None:
+                    logger.warning(f"SCR unable to find checkpoint")
+                    return None, None
+                print(f"SCR found dataset named '{tag}'")
             else:
-                logger.warning(f"Unable to find latest file at {latest_path}, if trying to load latest " \
-                "checkpoint please ensure this file exists or pass an explicit checkpoint tag when loading a checkpoint.")
-                return None, None
+                latest_path = os.path.join(load_dir, 'latest')
+                if os.path.isfile(latest_path):
+                    with open(latest_path, 'r') as fd:
+                        tag = fd.read().strip()
+                else:
+                    logger.warning(f"Unable to find latest file at {latest_path}, if trying to load latest " \
+                    "checkpoint please ensure this file exists or pass an explicit checkpoint tag when loading a checkpoint.")
+                    return None, None
 
+        print(f"Loading deepspeed ckpt from {load_dir}")
         load_path, client_states = self._load_checkpoint(load_dir,
                                                          tag,
                                                          load_module_strict=load_module_strict,
@@ -1929,15 +1954,19 @@ class DeepSpeedEngine(Module):
         process with rank 0.
         """
 
+        start_zero_pro = time.time()
         if self.zero_optimization_partition_weights():
             # Prepare for state_dict() by ensuring all parameters are partitioned
             self.optimizer.save_checkpoint_prologue()
+        end_zero_pro = time.time()
 
         # This is to make sure the checkpoint names are created without collision
         # There seems to be issue creating them in parallel
 
+        # SCR: avoid creating directory since SCR will do that as needed on flush
         # Ensure save_dir directory exists
-        os.makedirs(save_dir, exist_ok=True)
+        if not self.use_scr:
+            os.makedirs(save_dir, exist_ok=True)
 
         if tag is None:
             tag = f"global_step{self.global_steps}"
@@ -1948,25 +1977,61 @@ class DeepSpeedEngine(Module):
         # Ensure checkpoint tag is consistent across ranks
         self._checkpoint_tag_validation(tag)
 
+        # SCR: start checkpoint, use tag as the dataset name
+        valid = True
+        if self.use_scr:
+            # Consider checkpoint to be defensive unless the global step count
+            # is divisible by the save_interval, then also mark as output to force flush
+            scr_flags = scr.FLAG_CHECKPOINT
+            if self.global_steps % self.scr_output_interval == 0:
+                scr_flags |= scr.FLAG_OUTPUT
+            scr.start_output(tag, scr_flags)
+
+        start_non_zero = time.time()
         if self.save_non_zero_checkpoint:
-            self._create_checkpoint_file(save_dir, tag, False)
+            if not self.use_scr:
+                self._create_checkpoint_file(save_dir, tag, False)
             self._save_checkpoint(save_dir, tag, client_state=client_state)
+        end_non_zero = time.time()
 
+        start_zero = time.time()
         if self.save_zero_checkpoint:
-            self._create_zero_checkpoint_files(save_dir, tag)
+            if not self.use_scr:
+                self._create_zero_checkpoint_files(save_dir, tag)
             self._save_zero_checkpoint(save_dir, tag)
+        end_zero = time.time()
 
+        # SCR: Avoid writing the latest file when using SCR.
+        #      It can't be written as an SCR file,
+        #      since each checkpoint writes to this same file.
+        #      Instead, SCR returns the tag value during restart via scr.have_restart().
         # Save latest checkpoint tag
-        if save_latest:
+        if save_latest and not self.use_scr:
             with open(os.path.join(save_dir, 'latest'), 'w') as fd:
                 fd.write(tag)
 
+        start_zero_epi = time.time()
         if self.zero_optimization_partition_weights():
             self.optimizer.save_checkpoint_epilogue()
+        end_zero_epi = time.time()
 
+        # TODO: Set valid=False if calling rank failed to write any of its checkpoint files.
+        # SCR: complete checkpoint
+        if self.use_scr:
+            scr.complete_output(valid)
+
+        if self.global_rank == 0:
+            print(f"zero_pro: {end_zero_pro - start_zero_pro}")
+            print(f"non_zero: {end_non_zero - start_non_zero}")
+            print(f"zero:     {end_zero - start_zero}")
+            print(f"zero_epi: {end_zero_epi - start_zero_epi}")
         return True
 
     def _create_checkpoint_file(self, save_dir, tag, zero_checkpoint):
+        # SCR: skip creating directory since SCR will create it as needed during flush
+        if self.use_scr:
+            return True
+
         name_function = self._get_zero_ckpt_name if zero_checkpoint else self._get_ckpt_name
         try:
             checkpoint_name = name_function(save_dir, tag)
@@ -1990,6 +2055,7 @@ class DeepSpeedEngine(Module):
 
     def _save_checkpoint(self, save_dir, tag, client_state={}):
 
+        start_save_checkpoint = time.time()
         save_path = self._get_ckpt_name(save_dir, tag)
         # A hack to save the checkpointing directory. Pipeline parallelism overrides
         # module_state_dict() and uses this path to save the model. module_state_dict()
@@ -2011,11 +2077,22 @@ class DeepSpeedEngine(Module):
                      ds_config=self.config,
                      ds_version=version)
         state.update(client_state)
+        end_save_checkpoint = time.time()
 
+        # SCR: register checkpoint with SCR, and get path to open file from SCR
+        if self.use_scr:
+            save_path = scr.route_file(save_path)
+
+        start_torch_save_checkpoint = time.time()
         log_dist(message=f'Saving model checkpoint: {save_path}', ranks=[0])
         #logger.info('Saving model checkpoint: {}'.format(save_path))
         torch.save(state, save_path)
         self._curr_save_path = None
+        end_torch_save_checkpoint = time.time()
+
+        if self.global_rank == 0:
+            print(f"  non_zero_save:  {end_save_checkpoint - start_save_checkpoint}")
+            print(f"  non_zero_write: {end_torch_save_checkpoint - start_torch_save_checkpoint}")
 
     def _get_buffer_names(self):
         buffer_names = []
@@ -2057,14 +2134,27 @@ class DeepSpeedEngine(Module):
         os.chmod(dst, os.stat(dst).st_mode | stat.S_IEXEC)
 
     def _save_zero_checkpoint(self, save_path, tag):
+        start_save_checkpoint = time.time()
         zero_checkpoint_name = self._get_zero_ckpt_name(save_path, tag)
         zero_sd = dict(optimizer_state_dict=self.optimizer.state_dict(),
                        param_shapes=self._get_param_shapes(),
                        ds_config=self.config,
                        ds_version=version)
+        end_save_checkpoint = time.time()
+
+        # SCR: register checkpoint with SCR, and get path to open file from SCR
+        if self.use_scr:
+            zero_checkpoint_name = scr.route_file(zero_checkpoint_name)
+
+        start_torch_save_checkpoint = time.time()
         torch.save(zero_sd, zero_checkpoint_name)
-        self._copy_recovery_script(save_path)
+        #self._copy_recovery_script(save_path)
         #logger.info('zero checkpoint saved {}'.format(zero_checkpoint_name))
+        end_torch_save_checkpoint = time.time()
+
+        if self.global_rank == 0:
+            print(f"  zero_prep:  {end_save_checkpoint - start_save_checkpoint}")
+            print(f"  zero_write: {end_torch_save_checkpoint - start_torch_save_checkpoint}")
 
     def _zero3_consolidated_fp16_state_dict(self):
         """

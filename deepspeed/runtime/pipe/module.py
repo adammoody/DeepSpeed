@@ -17,6 +17,9 @@ from ..activation_checkpointing import checkpointing
 from .topology import PipeDataParallelTopology, PipelineParallelGrid
 from deepspeed.runtime.state_dict_factory import SDLoaderFactory
 
+# SCR: import Scalable Checkpoint/Restart library
+import scr
+
 
 class PipelineError(Exception):
     """Errors related to the use of deepspeed.PipelineModule """
@@ -132,6 +135,9 @@ class PipelineModule(nn.Module):
 
         if num_stages is None and topology is None:
             raise RuntimeError('must provide num_stages or topology')
+
+        # SCR: TODO: pass this in as a configurable option
+        self.use_scr = True
 
         self.micro_offset = 0
 
@@ -553,12 +559,20 @@ class PipelineModule(nn.Module):
         if self._grid.data_parallel_id != 0:
             return
 
-        os.makedirs(save_dir, exist_ok=True)
+        # SCR: skip makedirs since SCR will create them as needed during the flush
+        if not self.use_scr:
+            os.makedirs(save_dir, exist_ok=True)
+
         layer_offset = self._local_start
         for idx, layer in enumerate(self.forward_funcs):
             model_ckpt_path = self.ckpt_layer_path(save_dir, idx)
             if not hasattr(layer, 'state_dict'):
                 continue
+
+            # SCR: register checkpoint file and get path to write file from SCR
+            if self.use_scr:
+                model_ckpt_path = scr.route_file(model_ckpt_path)
+
             torch.save(layer.state_dict(), model_ckpt_path)
 
     def load_state_dir(self, load_dir, strict=True):
