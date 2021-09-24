@@ -150,11 +150,11 @@ class DeepSpeedEngine(Module):
         # TODO: one could add scr.need_checkpoint() and scr.should_exit()
         # SCR: initialize SCR
         self.use_scr = True
-        if self.use_scr:
-            # DeepSpeed expects checkpoint files to be in a global file system on restart
-            scr.config("SCR_GLOBAL_RESTART=1")
-
-            scr.init()
+#        if self.use_scr:
+#            # DeepSpeed expects checkpoint files to be in a global file system on restart
+#            scr.config("SCR_GLOBAL_RESTART=1")
+#
+#            scr.init()
 
         see_memory_usage(f"DeepSpeed Engine: Before args sanity test")
         self._do_args_sanity_check(args)
