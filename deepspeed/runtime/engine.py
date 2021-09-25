@@ -1988,10 +1988,9 @@ class DeepSpeedEngine(Module):
             scr.start_output(tag, scr_flags)
 
         start_non_zero = time.time()
-        if self.save_non_zero_checkpoint:
-            if not self.use_scr:
-                self._create_checkpoint_file(save_dir, tag, False)
-            self._save_checkpoint(save_dir, tag, client_state=client_state)
+        if not self.use_scr:
+            self._create_checkpoint_file(save_dir, tag, False)
+        self._save_checkpoint(save_dir, tag, client_state=client_state)
         end_non_zero = time.time()
 
         start_zero = time.time()
@@ -2054,15 +2053,21 @@ class DeepSpeedEngine(Module):
         return success
 
     def _save_checkpoint(self, save_dir, tag, client_state={}):
+        #if not self.save_non_zero_checkpoint:
+        #    return
 
         start_save_checkpoint = time.time()
         save_path = self._get_ckpt_name(save_dir, tag)
+
         # A hack to save the checkpointing directory. Pipeline parallelism overrides
         # module_state_dict() and uses this path to save the model. module_state_dict()
-        # then instead just returns None.
+        # then instead just returns None.  The module_state_dict() implementation in
+        # PipelineEngine expects the save path to be set in self._curr_ckpt_path.
         self._curr_ckpt_path = os.path.join(save_dir, tag)
+        module = self.module_state_dict()
+        self._curr_ckpt_path = None
 
-        state = dict(module=self.module_state_dict(),
+        state = dict(module=module,
                      buffer_names=self._get_buffer_names(),
                      optimizer=self.optimizer.state_dict()
                      if self.optimizer and not self.zero_optimization() else None,
@@ -2079,15 +2084,16 @@ class DeepSpeedEngine(Module):
         state.update(client_state)
         end_save_checkpoint = time.time()
 
-        # SCR: register checkpoint with SCR, and get path to open file from SCR
-        if self.use_scr:
-            save_path = scr.route_file(save_path)
-
         start_torch_save_checkpoint = time.time()
-        log_dist(message=f'Saving model checkpoint: {save_path}', ranks=[0])
-        #logger.info('Saving model checkpoint: {}'.format(save_path))
-        torch.save(state, save_path)
-        self._curr_save_path = None
+        if self.save_non_zero_checkpoint:
+            log_dist(message=f'Saving model checkpoint: {save_path}', ranks=[0])
+            #logger.info('Saving model checkpoint: {}'.format(save_path))
+
+            # SCR: register checkpoint with SCR, and get path to open file from SCR
+            if self.use_scr:
+                save_path = scr.route_file(save_path)
+
+            torch.save(state, save_path)
         end_torch_save_checkpoint = time.time()
 
         if self.global_rank == 0:
