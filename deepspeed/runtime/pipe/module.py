@@ -556,16 +556,35 @@ class PipelineModule(nn.Module):
         return ckpt_files
 
     def save_state_dict(self, save_dir):
-        if self._grid.data_parallel_id != 0:
-            return
+        #if self._grid.data_parallel_id != 0:
+        #    return
+
+        # temporary, guessing there is already a function like this that can be used instead
+        def get_start_end(count, rank, numranks):
+            num, remainder = divmod(count, numranks)
+            if rank < remainder:
+                start = (num + 1) * rank
+                end = start + num + 1
+            else:
+                start = (num + 1) * remainder + num * (rank - remainder)
+                end = start + num
+            return start, end
+
+        # Processes having the same model parallel rank on different data parallel instances
+        # have identical layer weights.  We distribute the task of saving the layer weights
+        # among the data parallel ranks.  For example, if a pipeline stage has 11 layers and
+        # if there are 2 data parallel instances, rank 0 will save the first 5 layers and
+        # rank 1 will save the last 4.
+        start, end = get_start_end(len(self.forward_funcs), self._grid.data_parallel_id, self._grid.data_parallel_size)
+        #start, end = 0, len(self.forward_funcs)
 
         # SCR: skip makedirs since SCR will create them as needed during the flush
         if not self.use_scr:
             os.makedirs(save_dir, exist_ok=True)
 
-        layer_offset = self._local_start
-        for idx, layer in enumerate(self.forward_funcs):
-            model_ckpt_path = self.ckpt_layer_path(save_dir, idx)
+        for idx, layer in enumerate(self.forward_funcs[start:end]):
+            model_ckpt_path = self.ckpt_layer_path(save_dir, start + idx)
+            #print(f"rank={self.global_rank} dp_rank={self._grid.data_parallel_id} dp_size={self._grid.data_parallel_size} start={start} end={end} path={model_ckpt_path}", flush=True)
             if not hasattr(layer, 'state_dict'):
                 continue
 
