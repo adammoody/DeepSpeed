@@ -2588,9 +2588,11 @@ class DeepSpeedEngine(Module):
                 # SCR: get name of latest checkpoint from SCR
                 tag = scr.have_restart()
                 if tag is None:
-                    logger.warning(f"SCR unable to find checkpoint")
+                    if self.global_rank == 0:
+                        logger.warning(f"SCR unable to find checkpoint")
                     return None, None
-                print(f"SCR found dataset named '{tag}'")
+                if self.global_rank == 0:
+                    logger.info(f"SCR found dataset named '{tag}'")
             else:
                 latest_tag = "latest_universal" if self.load_universal_checkpoint() else "latest"
                 latest_path = os.path.join(load_dir, latest_tag)
