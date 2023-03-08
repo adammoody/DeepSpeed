@@ -3136,16 +3136,6 @@ class DeepSpeedEngine(Module):
         # Ensure checkpoint tag is consistent across ranks
         self._checkpoint_tag_validation(tag)
 
-        # SCR: start checkpoint, use tag as the dataset name
-        valid = True
-        if self.use_scr:
-            # Consider checkpoint to be defensive unless the global step count
-            # is divisible by the save_interval, then also mark as output to force flush
-            scr_flags = scr.FLAG_CHECKPOINT
-            if self.global_steps % self.scr_output_interval == 0:
-                scr_flags |= scr.FLAG_OUTPUT
-            scr.start_output(tag, scr_flags)
-
         if self.has_moe_layers:
             self.save_non_zero_checkpoint = False
             self._create_checkpoint_file(save_dir, tag, False)
@@ -3177,11 +3167,6 @@ class DeepSpeedEngine(Module):
                 fd.write(tag)
 
         dist.barrier()
-
-        # TODO: Set valid=False if calling rank failed to write any of its checkpoint files.
-        # SCR: complete checkpoint
-        if self.use_scr:
-            scr.complete_output(valid)
 
         return True
 
@@ -3382,11 +3367,6 @@ class DeepSpeedEngine(Module):
 
         if self.save_non_zero_checkpoint:
             log_dist(message=f'Saving model checkpoint: {save_path}', ranks=[0, 1])
-
-            # SCR: register checkpoint with SCR, and get path to open file from SCR
-            if self.use_scr:
-                save_path = scr.route_file(save_path)
-
             self.checkpoint_engine.save(state, save_path)
 
     def _get_buffer_names(self):
@@ -3467,11 +3447,6 @@ class DeepSpeedEngine(Module):
         zero_sd = dict(optimizer_state_dict=self.optimizer.state_dict(),
                        ds_config=self.config,
                        ds_version=version)
-
-        # SCR: register checkpoint with SCR, and get path to open file from SCR
-        if self.use_scr:
-            zero_checkpoint_name = scr.route_file(zero_checkpoint_name)
-
         self.checkpoint_engine.save(zero_sd, zero_checkpoint_name)
 
         # TODO: fixme

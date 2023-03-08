@@ -606,11 +606,6 @@ class PipelineModule(nn.Module):
                 {k: v.clone()
                  for k,
                  v in orig_state_dict.items()})
-
-            # SCR: register checkpoint file and get path to write file from SCR
-            if self.use_scr:
-                model_ckpt_path = scr.route_file(model_ckpt_path)
-
             checkpoint_engine.save(final_state_dict, model_ckpt_path)
 
     def load_state_dir(self, load_dir, checkpoint_engine, strict=True):
