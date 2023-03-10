@@ -13,13 +13,18 @@ class SCRCheckpointEngine(CheckpointEngine):
         super().__init__(config_params)
 
     def create(self, tag):
-        log_dist(f"[Torch] Checkpoint {tag} is begin to save!", ranks=[0])
+        log_dist(f"[SCR] Checkpoint {tag} is starting to save!", ranks=[0])
         scr.start_output(tag, scr.FLAG_CHECKPOINT | scr.FLAG_OUTPUT)
+
+    def makedirs(self, path, exist_ok=False):
+        # SCR delays creating directories until it flushes the checkpoint.
+        # Based on how the user has configured their run,
+        # SCR may discard some checkpoints without ever flushing them.
+        pass
 
     def save(self, state_dict, path: str):
         path = scr.route_file(path)
         torch.save(state_dict, path)
-        return None
 
     def load(self, path: str, map_location=None):
         path = scr.route_file(path)
@@ -28,5 +33,5 @@ class SCRCheckpointEngine(CheckpointEngine):
 
     def commit(self, tag):
         scr.complete_output(True)
-        logger.info(f"[Torch] Checkpoint {tag} is ready now!")
+        logger.info(f"[SCR] Checkpoint {tag} is complete!", ranks=[0])
         return True

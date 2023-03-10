@@ -183,8 +183,6 @@ class PipelineEngine(DeepSpeedEngine):
 
         self.module.checkpoint_parallel_write_pipeline = self._config.checkpoint_parallel_write_pipeline
 
-        self.module.use_scr = self.use_scr
-
         if self.is_last_stage():
             self.loss_model = self.module.loss_fn
 

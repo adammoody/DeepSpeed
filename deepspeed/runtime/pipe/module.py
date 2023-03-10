@@ -18,9 +18,6 @@ from .topology import PipeDataParallelTopology, PipelineParallelGrid
 from deepspeed.runtime.state_dict_factory import SDLoaderFactory
 from deepspeed.accelerator import get_accelerator
 
-# SCR: import Scalable Checkpoint/Restart library
-import scr
-
 
 class PipelineError(Exception):
     """Errors related to the use of deepspeed.PipelineModule """
