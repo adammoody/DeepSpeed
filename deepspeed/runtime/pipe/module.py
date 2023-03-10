@@ -18,6 +18,9 @@ from .topology import PipeDataParallelTopology, PipelineParallelGrid
 from deepspeed.runtime.state_dict_factory import SDLoaderFactory
 from deepspeed.accelerator import get_accelerator
 
+# SCR: import Scalable Checkpoint/Restart library
+import scr
+
 
 class PipelineError(Exception):
     """Errors related to the use of deepspeed.PipelineModule """
@@ -587,7 +590,10 @@ class PipelineModule(nn.Module):
             start, end = 0, num_layers
         layer_list = self.forward_funcs[start:end]
 
-        os.makedirs(save_dir, exist_ok=True)
+        # SCR: skip makedirs since SCR will create them as needed during the flush
+        if not self.use_scr:
+            os.makedirs(save_dir, exist_ok=True)
+
         for idx, layer in enumerate(layer_list):
             model_ckpt_path = self.ckpt_layer_path(save_dir, start + idx)
             if not hasattr(layer, 'state_dict'):
@@ -603,6 +609,11 @@ class PipelineModule(nn.Module):
                 {k: v.clone()
                  for k,
                  v in orig_state_dict.items()})
+
+            # SCR: register checkpoint file and get path to write file from SCR
+            if self.use_scr:
+                model_ckpt_path = scr.route_file(model_ckpt_path)
+
             checkpoint_engine.save(final_state_dict, model_ckpt_path)
 
     def load_state_dir(self, load_dir, checkpoint_engine, strict=True):
