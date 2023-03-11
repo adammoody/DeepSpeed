@@ -77,6 +77,7 @@ from deepspeed.runtime.data_pipeline.data_routing.helper import remove_random_lt
 from deepspeed.runtime.data_pipeline.data_routing.basic_layer import RandomLayerTokenDrop
 
 from deepspeed.runtime.checkpoint_engine.torch_checkpoint_engine import TorchCheckpointEngine
+from deepspeed.runtime.checkpoint_engine.scr_checkpoint_engine import SCRCheckpointEngine
 
 from .pipe.module import PipelineModule
 from .utils import get_ma_status
@@ -922,7 +923,8 @@ class DeepSpeedEngine(Module):
 
         rank = self.local_rank if self.use_node_local_storage() else dp_rank
 
-        self.checkpoint_engine = TorchCheckpointEngine(rank=rank)
+        #self.checkpoint_engine = TorchCheckpointEngine(rank=rank)
+        self.checkpoint_engine = SCRCheckpointEngine(rank=rank)
 
         if self._config is not None and self._config.nebula_config.enabled:
             try:
@@ -3416,8 +3418,10 @@ class DeepSpeedEngine(Module):
                        ds_version=version)
         self.checkpoint_engine.save(zero_sd, zero_checkpoint_name)
 
-        if self.global_rank == 0:
-            self._copy_recovery_script(save_path)
+        # TODO: fixme
+        # SCR: disable copying of recovery script
+        #if self.global_rank == 0:
+        #    self._copy_recovery_script(save_path)
         ckpt_type = 'zero' if self.zero_optimization() else 'bf16_zero'
         logger.info(f'{ckpt_type} checkpoint saved {zero_checkpoint_name}')
 
