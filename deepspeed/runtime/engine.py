@@ -916,7 +916,13 @@ class DeepSpeedEngine(Module):
         log_dist(f'DeepSpeed LR Scheduler = {self.lr_scheduler}', ranks=[0])
 
     def _configure_checkpointing(self, dist_init_required):
-        self.checkpoint_engine = TorchCheckpointEngine()
+        dp_rank = self.global_rank
+        if self.mpu:
+            dp_rank = self.mpu.get_data_parallel_rank()
+
+        rank = self.local_rank if self.use_node_local_storage() else dp_rank
+
+        self.checkpoint_engine = TorchCheckpointEngine(rank=rank)
 
         if self._config is not None and self._config.nebula_config.enabled:
             try:
@@ -928,13 +934,7 @@ class DeepSpeedEngine(Module):
                 logger.error(
                     f"No torch_nebula was found! Will fall back to torch.save. Details: {err}"
                 )
-                self.checkpoint_engine = TorchCheckpointEngine()
-
-        dp_rank = self.global_rank
-        if self.mpu:
-            dp_rank = self.mpu.get_data_parallel_rank()
-
-        rank = self.local_rank if self.use_node_local_storage() else dp_rank
+                self.checkpoint_engine = TorchCheckpointEngine(rank=rank)
 
         # only the first data parallel process needs to store the model checkpoint
         # if you want to use node local storage this must be done by rank 0 on each
@@ -2748,23 +2748,20 @@ class DeepSpeedEngine(Module):
         """
 
         if tag is None:
-            latest_tag = "latest_universal" if self.load_universal_checkpoint(
-            ) else "latest"
-            latest_path = os.path.join(load_dir, latest_tag)
-            if os.path.isfile(latest_path):
-                with open(latest_path, "r") as fd:
-                    tag = fd.read().strip()
+            tag = "latest_universal" if self.load_universal_checkpoint() else "latest"
+
+        tag = self.checkpoint_engine.open(load_dir, tag)
+
+        if tag is None:
+            if self.load_universal_checkpoint():
+                raise ValueError(
+                    f'Invalid for universal checkpoint: {load_dir} does not exist')
             else:
-                if self.load_universal_checkpoint():
-                    raise ValueError(
-                        f'Invalid for universal checkpoint: {latest_path} does not exist'
-                    )
-                else:
-                    logger.warning(
-                        f"Unable to find latest file at {latest_path}, if trying to load latest "
-                        "checkpoint please ensure this file exists or pass an explicit checkpoint tag when loading a checkpoint."
-                    )
-                    return None, None
+                logger.warning(
+                    f"Unable to find latest file at {load_dir}, if trying to load latest "
+                    "checkpoint please ensure this file exists or pass an explicit checkpoint tag when loading a checkpoint."
+                )
+                return None, None
 
         if self.zero_optimization_partition_weights():
             # Prepare for checkpoint load by ensuring all parameters are partitioned
@@ -2789,6 +2786,8 @@ class DeepSpeedEngine(Module):
 
         if self.zero_optimization_partition_weights():
             self.optimizer.checkpoint_event_epilogue()
+
+        self.checkpoint_engine.close(tag)
 
         return load_path, client_states
 
@@ -3090,6 +3089,8 @@ class DeepSpeedEngine(Module):
         process with rank 0.
 
         """
+        # TODO: move save_latest to checkpoint config option for TorchCheckpointEngine?
+
         if self.zero_optimization_partition_weights():
             # Prepare for checkpoint save by ensuring all parameters are partitioned
             self.optimizer.checkpoint_event_prologue()
@@ -3108,7 +3109,7 @@ class DeepSpeedEngine(Module):
 
         # Ensure tag is a string
         tag = str(tag)
-        self.checkpoint_engine.create(tag)
+        self.checkpoint_engine.create(save_dir, tag)
 
         # Ensure checkpoint tag is consistent across ranks
         self._checkpoint_tag_validation(tag)
@@ -3135,9 +3136,6 @@ class DeepSpeedEngine(Module):
 
         # Save latest checkpoint tag
         self.checkpoint_engine.commit(tag)
-        if save_latest and rank == 0:
-            with open(os.path.join(save_dir, 'latest'), 'w') as fd:
-                fd.write(tag)
 
         dist.barrier()
 
