@@ -10,6 +10,17 @@
 
 </div>
 
+如需引用 DeepSpeed Chat，请引用我们的[arxiv report](https://arxiv.org/abs/2308.01320):
+
+```
+@article{yao2023dschat,
+  title={{DeepSpeed-Chat: Easy, Fast and Affordable RLHF Training of ChatGPT-like Models at All Scales}},
+  author={Zhewei Yao and Reza Yazdani Aminabadi and Olatunji Ruwase and Samyam Rajbhandari and Xiaoxia Wu and Ammar Ahmad Awan and Jeff Rasley and Minjia Zhang and Conglong Li and Connor Holmes and Zhongzhu Zhou and Michael Wyatt and Molly Smith and Lev Kurilenko and Heyang Qin and Masahiro Tanaka and Shuai Che and Shuaiwen Leon Song and Yuxiong He},
+  journal={arXiv preprint arXiv:2308.01320},
+  year={2023}
+}
+```
+
 # 1. 概述
 
 近日来，ChatGPT及类似模型引发了人工智能（AI）领域的一场风潮。 这场风潮对数字世界产生了革命性影响。ChatGPT类模型具有惊人的泛用性，能够执行归纳、编程、翻译等任务，其结果与人类专家相当甚至更优。为了使ChatGPT等模型的训练和部署更轻松，AI 开源社区进行了各种尝试（例如 ChatLLaMa、Alpaca、Vicuna、Databricks-Dolly等）。
@@ -78,15 +89,13 @@ DeepSpeed-RLHF 系统在大规模训练中具有无与伦比的效率，使复�
 
 以下示例展示了如何使用一个脚本，以预训练的 OPT-13B 作为 actor 模型，OPT-350M 作为 reward 模型，生成一个最终的 130 亿参数的 ChatGPT 类型的模型：
 ```
-git clone https://github.com/microsoft/DeepSpeed.git
-cd DeepSpeed
-pip install .
+pip install deepspeed>=0.9.0
 
 git clone https://github.com/microsoft/DeepSpeedExamples.git
 cd DeepSpeedExamples/applications/DeepSpeed-Chat/
 pip install -r requirements.txt
 
-python train.py --actor-model facebook/opt-13b --reward-model facebook/opt-350m --num-gpus 8
+python train.py --actor-model facebook/opt-13b --reward-model facebook/opt-350m --deployment-type single_node
 ```
 
 
@@ -109,7 +118,7 @@ python train.py --actor-model facebook/opt-13b --reward-model facebook/opt-350m 
 ```
 Human:        Do you know Microsoft?
 Assistant:    Yes, I’m a big fan of Microsoft.  What about them?
-Human:        Can you explian it to a 6-year old child? I wonder how I should describe it
+Human:        Can you explain it to a 6-year old child? I wonder how I should describe it
 Assistant:    Sure, I can try.  Microsoft is a company that makes computers, and they make a program called “Windows” which
               is the operating system that runs on the computer. It’s like the “brain” of the computer.  It’s where all the
               programs and files are stored. It’s also where you’ll find the “start” button, which is where you’ll start to
@@ -120,7 +129,7 @@ Assistant:    Sure, I can try.  Microsoft is a company that makes computers, and
 我们了解到用户通常喜欢尝试不同的模型大小和配置，以满足他们不同的训练时间、资源和质量的需求。借助 DeepSpeed-Chat，你可以轻松实现这些目标。例如，如果你想在 GPU 集群上训练一个更大、更高质量的模型，用于你的研究或业务，你可以使用相同的脚本，只需输入你期望的模型大小（例如 660 亿参数）和 GPU 数量（例如 64 个 GPU）：
 
 ```python
-python train.py --actor-model facebook/opt-66b --reward-model facebook/opt-350m --num-gpus 64
+python train.py --actor-model facebook/opt-66b --reward-model facebook/opt-350m --deployment-type multi_node
 ```
 
 在 接下来的9 小时内，你将拥有一个 660 亿参数的 ChatGPT 模型，并可以在你喜欢的前端 GUI 中使用：
@@ -138,7 +147,7 @@ python train.py --actor-model facebook/opt-66b --reward-model facebook/opt-350m 
 如果你只有大约 1-2 小时的咖啡或午餐休息时间，你也可以尝试使用 DeepSpeed-Chat 训练一个小型模型。例如，我们为单个数据集准备了一个 13 亿参数模型的训练示例，以便在你的消费级 GPU 上测试我们的框架。当你从午餐休息回来时，你的模型已经准备好供你使用！
 
 ```python
-python train.py --actor-model facebook/opt-1.3b --reward-model facebook/opt-350m --num-gpus 1
+python train.py --actor-model facebook/opt-1.3b --reward-model facebook/opt-350m --deployment-type single_gpu
 ```
 
 <div align="center">
@@ -310,7 +319,7 @@ DeepSpeed-HE 的核心技术基于 ZeRO，用于训练过程中将模型状态�
 DeepSpeed-Chat 是更大的DeepSpeed生态系统的一部分，包括众多深度学习系统和建模技术。要了解更多信息，
 
 * 请访问我们的[网站](https://www.deepspeed.ai/)，了解详细的博客文章、教程和有用的文档。
-* 你还可以关注我们的[英文 Twitter](https://twitter.com/MSFTDeepSpeed) 和[日文 Twitter](https://twitter.com/MSFTDeepSpeedJP)，了解 DeepSpeed 的最新动态。我们还将授权开源社KAIYUANSHE微信公众号第一时间发布我们的中文博客。
+* 我们会在[知乎](https://www.zhihu.com/people/deepspeed)上发布最新中文博客及动态。你还可以关注我们的[英文 Twitter](https://twitter.com/MSFTDeepSpeed) 和[日文 Twitter](https://twitter.com/MSFTDeepSpeedJP)。
 
 
 DeepSpeed 欢迎你的贡献！我们鼓励你在 [DeepSpeed GitHub](https://github.com/microsoft/DeepSpeed/) 页面报告问题、贡献 PR 并参与讨论。请参阅我们的[贡献指南](https://github.com/microsoft/DeepSpeed/blob/master/CONTRIBUTING.md)了解更多详情。我们愿意与大学、研究实验室、公司等进行合作，共同开展深度学习研究，将 DeepSpeed 应用于赋能现实世界的 AI 模型和应用等。对于此类需求（以及其他不适合在 GitHub 上提出的需求），请直接发送电子邮件至 deepspeed-info@microsoft.com。

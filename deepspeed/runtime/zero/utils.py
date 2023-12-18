@@ -10,7 +10,9 @@ import torch
 from deepspeed import comm as dist
 from deepspeed.utils import logger
 from deepspeed.ops.adam import DeepSpeedCPUAdam
+from deepspeed.ops.adagrad import DeepSpeedCPUAdagrad
 from deepspeed.ops.adam import FusedAdam
+from deepspeed.ops.lion import DeepSpeedCPULion, FusedLion
 from deepspeed.utils.nvtx import instrument_w_nvtx
 from deepspeed.accelerator import get_accelerator
 
@@ -35,7 +37,10 @@ class ZeRORuntimeException(Exception):
     pass
 
 
-ZERO_SUPPORTED_OPTIMIZERS = [torch.optim.Adam, torch.optim.AdamW, FusedAdam, DeepSpeedCPUAdam]
+ZERO_SUPPORTED_OPTIMIZERS = [
+    torch.optim.Adam, torch.optim.AdamW, FusedAdam, DeepSpeedCPUAdam, torch.optim.Adagrad, DeepSpeedCPUAdagrad,
+    DeepSpeedCPULion, FusedLion
+]
 
 # Add apex FusedAdam to supported list if apex is installed
 try:

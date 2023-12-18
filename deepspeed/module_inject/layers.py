@@ -10,6 +10,7 @@ from torch.nn import functional as F
 
 from torch.nn.parameter import Parameter
 from deepspeed.accelerator import get_accelerator
+from deepspeed.module_inject.tp_shard import get_shard_size, get_shard_size_list
 
 
 class LinearAllreduce(nn.Module):
@@ -23,7 +24,36 @@ class LinearAllreduce(nn.Module):
     def forward(self, input):
         output = torch.matmul(input, self.weight.transpose(-1, -2))
         if self.mp_group is not None:
-            dist.all_reduce(output, group=self.mp_group)
+            dist.inference_all_reduce(output, group=self.mp_group)
+        if self.bias is not None:
+            output += self.bias
+        return output
+
+
+class LmHeadLinearAllreduce(nn.Module):
+
+    def __init__(
+        self,
+        weight,
+        rank,
+        world_size,
+        bias=None,
+        mp_group=None,
+    ):
+        super(LmHeadLinearAllreduce, self).__init__()
+        self.weight = weight
+        self.bias = bias
+        self.mp_group = mp_group
+        self.rank = rank
+        self.world_size = world_size
+
+    def forward(self, input):
+        input_shard_size = get_shard_size(input.shape[-1], self.world_size)
+        input_shard_offset = sum(get_shard_size_list(input.shape[-1], self.world_size)[0:self.rank])
+        output = torch.matmul(input[:, :, input_shard_offset:input_shard_offset + input_shard_size],
+                              self.weight.transpose(-1, -2))
+        if self.mp_group is not None:
+            dist.inference_all_reduce(output, group=self.mp_group)
         if self.bias is not None:
             output += self.bias
         return output
@@ -110,3 +140,23 @@ class OPTEmbedding(EmbeddingLayer):
         positions = positions[:, past_key_values_length:]
 
         return super().forward(positions + self.offset)
+
+
+class RMSNormalize(nn.Module):
+
+    def __init__(self, dim=None, dtype=torch.float, eps=1e-5, weight=None):
+        super(RMSNormalize, self).__init__()
+        if weight is not None:
+            self.weight = weight
+        else:
+            self.weight = nn.Parameter(torch.ones(dim, dtype=dtype, device=get_accelerator().current_device_name()))
+
+        self.eps = eps
+
+    def forward(self, hidden_states):
+        variance = hidden_states.to(torch.float32).pow(2).mean(-1, keepdim=True)
+        hidden_states = hidden_states * torch.rsqrt(variance + self.eps)
+        if self.weight.dtype in [torch.float16, torch.bfloat16]:
+            hidden_states = hidden_states.to(self.weight.dtype)
+
+        return hidden_states * self.weight

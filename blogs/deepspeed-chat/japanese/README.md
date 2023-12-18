@@ -10,6 +10,17 @@
 
 </div>
 
+DeepSpeed Chat を引用するには、こちらの[arxiv report](https://arxiv.org/abs/2308.01320)を引用してください:
+
+```
+@article{yao2023dschat,
+  title={{DeepSpeed-Chat: Easy, Fast and Affordable RLHF Training of ChatGPT-like Models at All Scales}},
+  author={Zhewei Yao and Reza Yazdani Aminabadi and Olatunji Ruwase and Samyam Rajbhandari and Xiaoxia Wu and Ammar Ahmad Awan and Jeff Rasley and Minjia Zhang and Conglong Li and Connor Holmes and Zhongzhu Zhou and Michael Wyatt and Molly Smith and Lev Kurilenko and Heyang Qin and Masahiro Tanaka and Shuai Che and Shuaiwen Leon Song and Yuxiong He},
+  journal={arXiv preprint arXiv:2308.01320},
+  year={2023}
+}
+```
+
 # 1. 概要
 
 ChatGPT（チャットGPT）やその類似モデルは、AIの世界に旋風を巻き起こし、デジタル業界に革命的な影響を与えています。これらのモデルは非常に汎用性が高く、要約、コーディング、翻訳などの多様なタスクを、人間の専門家と同等か、それ以上の結果で実施できます。その圧倒的な性能を受けて、AI関連のオープンソースコミュニティでは、ChatGPTスタイルのモデルをより利用しやすくするための複数の取り組みが始まっています（ChatLLaMa、Alpaca、Vicuna、Databricks-Dollyなど）。
@@ -18,7 +29,7 @@ ChatGPT（チャットGPT）やその類似モデルは、AIの世界に旋風�
 
 ChatGPTの訓練に用いられるInstructGPTにおいて提案されたRLHFでは、これまでの標準的な事前学習やファインチューニングと全く異なり、はるかに複雑なパイプラインが必要となります。従来のソフトウェアでは、そうしたパイプラインが効果的にサポートする仕組みがありませんでした。そこで、RLHFの訓練を広くAIコミュニティで利用可能とし、ChatGPTのようなモデルを誰もが作成できるにするため、以下の機能を備えたDeepSpeed-Chatをリリースすることになりました。
 
-(i) ***容易に実施可能なChatGPTライクなモデルの訓練と推論***: Huggingfaceレポジトリで提供されている学習済みモデルから開始して、InstructGPT学習の全3ステップを実行し、独自のChatGPTライクなモデルを生成できるスクリプトを提供します。また、学習後の会話形式のインタラクションをテストするための推論APIを提供します。
+(i) ***容易に実施可能なChatGPTライクなモデルの訓練と推論***: Hugging Faceレポジトリで提供されている学習済みモデルから開始して、InstructGPT学習の全3ステップを実行し、独自のChatGPTライクなモデルを生成できるスクリプトを提供します。また、学習後の会話形式のインタラクションをテストするための推論APIを提供します。
 
 (ii) ***DeepSpeed-RLHF パイプライン***: DeepSpeed-RLHFパイプラインは、InstructGPTの学習パイプラインの3つのステップ a) 教師付きファインチューニング (Supervised fine-tuning, SFT), b) 報酬モデルのファインチューニング, c) RLHF (Reinforcement Learning with Human Feedback) を、包括的に、かつ1対1の対応を保って再現するものです。また、複数のデータソースからの同時学習を可能にするために、学習データの抽象化・ブレンド機能を提供します。
 
@@ -79,15 +90,13 @@ DeepSpeed-RLHFシステムは、大規模モデルの学習において類を見
 以下のスクリプトを実行すると、最終的に130億パラメータのChatGPTライクなモデルが生成されます。
 
 ```python
-git clone https://github.com/microsoft/DeepSpeed.git
-cd DeepSpeed
-pip install .
+pip install deepspeed>=0.9.0
 
 git clone https://github.com/microsoft/DeepSpeedExamples.git
 cd DeepSpeedExamples/applications/DeepSpeed-Chat/
 pip install -r requirements.txt
 
-python train.py --actor-model facebook/opt-13b --reward-model facebook/opt-350m --num-gpus 8
+python train.py --actor-model facebook/opt-13b --reward-model facebook/opt-350m --deployment-type single_node
 ```
 
 8台のA100を備えたDGXサーバを使う場合、130億パラメータのモデルを半日で訓練できます。以下は各ステップに要する時間の内訳です。
@@ -121,7 +130,7 @@ Assistant:    Sure, I can try.  Microsoft is a company that makes computers, a
 訓練の時間、計算機資源、および品質の要件を満たすために、さまざまなモデルのサイズや構成を試す必要があることがあります。DeepSpeed-Chatを使用すれば、簡単にそれが可能です。例えば、研究やビジネスのために、GPUクラスタでより大規模で高品質なモデルを訓練したい場合、希望するモデルサイズとGPU数を指定するだけです。以下は、アクターモデルのパラメータ数を66Bに、GPU数を64に指定する例です。
 
 ```python
-python train.py --actor-model facebook/opt-66b --reward-model facebook/opt-350m --num-gpus 64
+python train.py --actor-model facebook/opt-66b --reward-model facebook/opt-350m --deployment-type multi_node
 ```
 
 64台のA100 (80GBメモリ) GPUを使用する場合、9時間で660億パラメータのChatGPTモデルを訓練できます。
@@ -139,7 +148,7 @@ python train.py --actor-model facebook/opt-66b --reward-model facebook/opt-350m 
 1～2時間のコーヒータイムや昼休みに、DeepSpeed-Chatで小規模なトイモデルをトレーニングしてみるのも良いでしょう。例えば、コンシューマグレードのGPUでの訓練を動かしてみるため、1つのデータセットで1.3Bのモデルを訓練する例を用意しました。これなら、昼休みから戻ったときに、できあがったモデルのチェックポイントを試してみることができます。
 
 ```python
-python train.py --actor-model facebook/opt-1.3b --reward-model facebook/opt-350m --num-gpus 1
+python train.py --actor-model facebook/opt-1.3b --reward-model facebook/opt-350m --deployment-type single_gpu
 ```
 
 <div align="center">
@@ -235,12 +244,12 @@ DeepSpeed-HEは、訓練と推論の両方で、モデルの分割をシーム�
 
 ## 既存のRLHFシステムとのスループットとモデルサイズのスケーラビリティ比較
 
-DeepSpeed-RLHFは、Colossal-AIや、ネイティブのPyTorchを用いたHuggingFaceなどの他のRLHFを訓練可能なシステムと比較して、実行速度とスケーラビリティの両方で優れています。
+DeepSpeed-RLHFは、Colossal-AIや、ネイティブのPyTorchを用いたHugging Faceなどの他のRLHFを訓練可能なシステムと比較して、実行速度とスケーラビリティの両方で優れています。
 
-* スループットに関しては、DeepSpeedは単一GPUでのRLHFトレーニングで10倍以上の向上を実現しています（図3）。複数GPU環境では、Colossal-AIと比較して6～19倍、HuggingFace DDPと比較して1.4～10.5倍のスピードアップを実現しています（図4）。
+* スループットに関しては、DeepSpeedは単一GPUでのRLHFトレーニングで10倍以上の向上を実現しています（図3）。複数GPU環境では、Colossal-AIと比較して6～19倍、Hugging Face DDPと比較して1.4～10.5倍のスピードアップを実現しています（図4）。
 * モデルのスケーラビリティに関しては、Colossal-AIが最大で1.3Bのモデルを単一GPUで、6.7BのモデルをA100-40Gを備えた単一のノードで訓練できますが、DeepSpeed-HEは同じハードウェアでそれぞれ6.5Bと50Bのサイズのモデルを訓練できます。これは、最大で7.5倍のモデルサイズを扱えることになります。
 
-したがって、DeepSpeed-HEは、Colossal-AIやHuggingFace DDPなどの既存のRLHFシステムと比較して、1桁以上高いスループットを実現しており、同じ実行時間ではるかに大きなアクターモデルを訓練したり、10倍以上低いコストで同様のサイズのモデルを訓練することができます。
+したがって、DeepSpeed-HEは、Colossal-AIやHugging Face DDPなどの既存のRLHFシステムと比較して、1桁以上高いスループットを実現しており、同じ実行時間ではるかに大きなアクターモデルを訓練したり、10倍以上低いコストで同様のサイズのモデルを訓練することができます。
 
 <div align="center">
 
@@ -258,7 +267,7 @@ DeepSpeed-RLHFは、Colossal-AIや、ネイティブのPyTorchを用いたHuggin
 
 </div>
 
-この効率化は、DeepSpeed-HEが、DeepSpeedの高度に最適化された推論機能を活用して、RLHF処理の生成フェーズを高速化したことに起因しています。図5は、1.3BパラメータモデルのRLHF訓練の時間内訳を示したもので、時間の大半は生成フェーズに費やされていることが分かります。DeepSpeedの高性能な推論カーネルを活用することで、DeepSpeed-HEはこのフェーズでHuggingFaceの9倍、Colossal-AIの15倍のスループット向上を達成し、end-to-endの類を見ない効率化を実現しています。
+この効率化は、DeepSpeed-HEが、DeepSpeedの高度に最適化された推論機能を活用して、RLHF処理の生成フェーズを高速化したことに起因しています。図5は、1.3BパラメータモデルのRLHF訓練の時間内訳を示したもので、時間の大半は生成フェーズに費やされていることが分かります。DeepSpeedの高性能な推論カーネルを活用することで、DeepSpeed-HEはこのフェーズでHugging Faceの9倍、Colossal-AIの15倍のスループット向上を達成し、end-to-endの類を見ない効率化を実現しています。
 
 <div align="center">
 
